@@ -58,9 +58,7 @@ def main():
                     )
 
             modules = station["modules"]
-            for (
-                module
-            ) in modules:  # moduleData in weatherData.lastData(exclude=3600).items():
+            for module in modules:
                 for measurement in [
                     "altitude",
                     "country",
@@ -103,7 +101,5 @@ def main():
             client.write_points(module_data, time_precision="s", database="netatmo")
 
             print(station)
-            print(station_data)
-            print(module_data)
         print("Sleep for 5s")
-        time.sleep(5000)
+        time.sleep(5)
