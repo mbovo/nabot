@@ -1,0 +1,20 @@
+[tool.poetry]
+name = "nabot"
+version = "0.1.0"
+description = ""
+authors = ["Manuel Bovo <manuel.bovo@gmail.com>"]
+
+[tool.poetry.dependencies]
+python = "^3.9"
+influxdb = "^5.3.1"
+lnetatmo = "^2.1.0"
+rich = "^10.12.0"
+
+[tool.poetry.dev-dependencies]
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.scripts]
+nabot = "nabot.main:main"
