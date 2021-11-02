@@ -22,25 +22,26 @@ def main():
         scope="read_station",
     )
 
-    weatherData = lnetatmo.WeatherStationData(authorization)
-
     client = InfluxDBClient(host=os.getenv("NABOT_INFLUXDB_HOST"))
     if {"name": "netatmo"} not in client.get_list_database():
         client.create_database("netatmo")
 
     while True:
 
+        weatherData = lnetatmo.WeatherStationData(authorization)
+
         for station in weatherData.stations:
             station_data = []
             module_data = []
             station = weatherData.stationById(station)
             station_name = station["station_name"]
-            altitude = station["place"]["altitude"]
-            country = station["place"]["country"]
-            timezone = station["place"]["timezone"]
-            longitude = station["place"]["location"][0]
-            latitude = station["place"]["location"][1]
-
+            raw_data = {
+                "altitude": station["place"]["altitude"],
+                "country": station["place"]["country"],
+                "timezone": station["place"]["timezone"],
+                "longitude": station["place"]["location"][0],
+                "latitude": station["place"]["location"][1],
+            }
             for sensor, value in station["dashboard_data"].items():
                 if sensor.lower() not in ["time_utc"]:
                     if type(value) == int:
@@ -66,7 +67,7 @@ def main():
                     "latitude",
                     "timezone",
                 ]:
-                    value = eval(measurement)
+                    value = raw_data[measurement]
                     if type(value) == int:
                         value = float(value)
                     station_data.append(
