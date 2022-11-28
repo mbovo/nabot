@@ -2,7 +2,8 @@
 # encoding=utf-8
 
 import lnetatmo
-from influxdb import InfluxDBClient
+from influxdb_client import InfluxDBClient, Point
+from influxdb_client.client.write_api import SYNCHRONOUS
 from rich import print
 import click
 import time
@@ -56,7 +57,7 @@ def main():
     "INFLUXDB_HOST",
     envvar="INFLUXDB_HOST",
     required=False,
-    default="localhost",
+    default="http://localhost:8086",
     help="Influx DB hostname",
 )
 @click.option(
@@ -77,8 +78,41 @@ def main():
     default=30,
     help="Interval in seconds between each scrape",
 )
+@click.option(
+    "--influx-token",
+    "INFLUXDB_TOKEN",
+    envvar="INFLUXDB_TOKEN",
+    required=False,
+    default=None,
+    help="Influx DB token",
+)
+@click.option(
+    "--influx-org",
+    "INFLUXDB_ORG",
+    envvar="INFLUXDB_ORG",
+    required=False,
+    default=None,
+    help="Influx DB organization",
+)
+@click.option(
+    "--influx-bucket",
+    "INFLUXDB_BUCKET",
+    envvar="INFLUXDB_BUCKET",
+    required=False,
+    default="netatmo",
+    help="Influx DB bucket",
+)
 def start(
-    CLIENT_ID, CLIENT_SECRET, USERNAME, PASSWORD, INFLUXDB_HOST, DRY_RUN, INTERVAL
+    CLIENT_ID,
+    CLIENT_SECRET,
+    USERNAME,
+    PASSWORD,
+    INFLUXDB_HOST,
+    DRY_RUN,
+    INTERVAL,
+    INFLUXDB_BUCKET,
+    INFLUXDB_TOKEN,
+    INFLUXDB_ORG,
 ):
     authorization = lnetatmo.ClientAuth(
         clientId=CLIENT_ID,
@@ -89,17 +123,19 @@ def start(
     )
 
     if not DRY_RUN:
-        client = InfluxDBClient(INFLUXDB_HOST)
-        if {"name": "netatmo"} not in client.get_list_database():
-            client.create_database("netatmo")
+        client = InfluxDBClient(
+            INFLUXDB_HOST,
+            org=INFLUXDB_ORG,
+            token=INFLUXDB_TOKEN,
+        ).write_api(write_options=SYNCHRONOUS)
 
     while True:
 
         weatherData = lnetatmo.WeatherStationData(authorization)
 
+        points: list[Point] = []
+
         for station in weatherData.stations:
-            station_data = []
-            module_data = []
             station = weatherData.stationById(station)
             station_name = station["station_name"]
             raw_data = {
@@ -113,16 +149,22 @@ def start(
                 if sensor.lower() not in ["time_utc"]:
                     if type(value) == int:
                         value = float(value)
-                    module_data.append(
-                        {
-                            "measurement": sensor.lower(),
-                            "tags": {
-                                "station": station_name,
-                                "module": "Interno",
-                            },
-                            "time": station["dashboard_data"]["time_utc"],
-                            "fields": {"value": value},
-                        }
+                    points.append(
+                        Point(sensor.lower())
+                        .field("value", value)
+                        .tag("station", station_name)
+                        .tag("module", "Interno")
+                        .tag("type", "station")
+                        .tag("sensor", sensor.lower())
+                        .tag(
+                            "unit",
+                            "°C"
+                            if sensor.lower() == "temperature"
+                            else "hPa"
+                            if sensor.lower() == "pressure"
+                            else "%",
+                        )
+                        .time(time.time_ns(), write_precision="ns")
                     )
 
             modules = station["modules"]
@@ -137,40 +179,49 @@ def start(
                     value = raw_data[measurement]
                     if type(value) == int:
                         value = float(value)
-                    station_data.append(
-                        {
-                            "measurement": measurement,
-                            "tags": {
-                                "station": station_name,
-                                "module": module["module_name"],
-                            },
-                            "time": module["last_message"],
-                            "fields": {"value": value},
-                        }
+                    points.append(
+                        Point(measurement)
+                        .field("value", value)
+                        .tag("station", station_name)
+                        .tag("module", module["module_name"])
+                        .tag("type", "module")
+                        .tag("sensor", measurement)
+                        .tag(
+                            "unit",
+                            "m"
+                            if measurement.lower() == "altitude"
+                            else "°"
+                            if measurement.lower() in ["longitude", "latitude"]
+                            else "",
+                        )
+                        .time(time.time_ns(), write_precision="ns")
                     )
 
                 for sensor, value in module["dashboard_data"].items():
                     if sensor.lower() not in ["time_utc"]:
                         if type(value) == int:
                             value = float(value)
-                        module_data.append(
-                            {
-                                "measurement": sensor.lower(),
-                                "tags": {
-                                    "station": station_name,
-                                    "module": module["module_name"],
-                                },
-                                "time": module["dashboard_data"]["time_utc"],
-                                "fields": {"value": value},
-                            }
+                        points.append(
+                            Point(sensor.lower())
+                            .field("value", value)
+                            .tag("station", station_name)
+                            .tag("module", module["module_name"])
+                            .tag("type", "module")
+                            .tag("sensor", sensor.lower())
+                            .tag(
+                                "unit",
+                                "°C"
+                                if sensor.lower() == "temperature"
+                                else "hPa"
+                                if sensor.lower() == "pressure"
+                                else "%",
+                            )
+                            .time(time.time_ns(), write_precision="ns")
                         )
 
             if not DRY_RUN:
-                client.write_points(
-                    station_data, time_precision="s", database="netatmo"
-                )
-                client.write_points(module_data, time_precision="s", database="netatmo")
+                client.write(INFLUXDB_BUCKET, record=points, write_precision="ns")
 
-            print(module_data)
+            print([str(x) for x in points])
         print(f"Sleep for {INTERVAL}s")
         time.sleep(INTERVAL)
